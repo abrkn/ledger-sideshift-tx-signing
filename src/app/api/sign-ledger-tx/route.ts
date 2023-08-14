@@ -9,29 +9,45 @@ import protobuf from 'protobufjs';
 
 // https://github.com/LedgerHQ/platform-app-test-exchange/blob/main/src/utils/numberToBigEndianBuffer.ts
 // x modified to be BigInt
-const numberToBigEndianBuffer = (x: BigInt) => {
-  var hex = x.toString(16);
-  return Uint8Array.from(
-    Buffer.from(hex.padStart(hex.length + (hex.length % 2), '0'), 'hex')
-  );
-};
+// const numberToBigEndianBuffer = (x: BigInt) => {
+//   var hex = x.toString(16);
+//   return Uint8Array.from(
+//     Buffer.from(hex.padStart(hex.length + (hex.length % 2), '0'), 'hex')
+//   );
+// };
+
+function bigIntToUInt64BE(value: bigint) {
+  const buffer = Buffer.alloc(8);
+  buffer.writeBigUInt64BE(value);
+  return buffer;
+}
+
+function serializeAmount(value: string) {
+  return Uint8Array.from(bigIntToUInt64BE(BigInt(value)));
+}
 
 // https://github.com/LedgerHQ/platform-app-test-exchange/blob/main/src/getData/index.ts
 // Based on above, modified to use proto.ledger_swap.NewTransactionResponse (not included in example repo)
 const generatePayload = (input: LedgerSignInput) => {
   const tr = new proto.ledger_swap.NewTransactionResponse();
 
-  tr.setPayinAddress(input.depositAddress);
-  input.depositMemo && tr.setPayinExtraId(input.depositMemo);
-  input.refundAddress && tr.setRefundAddress(input.refundAddress);
-  input.refundMemo && tr.setRefundExtraId(input.refundMemo);
-  tr.setPayoutAddress(input.settleAddress);
-  input.settleMemo && tr.setPayoutExtraId(input.settleMemo);
-  tr.setCurrencyFrom(input.depositMethodId);
-  tr.setCurrencyTo(input.settleMethodId);
-  tr.setAmountToProvider(numberToBigEndianBuffer(BigInt(input.depositAmount)));
-  tr.setAmountToWallet(numberToBigEndianBuffer(BigInt(input.settleAmount)));
-  tr.setDeviceTransactionId(input.deviceTransactionId);
+  tr.setPayinAddress(input.depositAddress); // 1
+  input.depositMemo && tr.setPayinExtraId(input.depositMemo); // 2
+  tr.setRefundAddress(input.depositAddress); // 3
+  input.refundMemo && tr.setRefundExtraId(input.refundMemo); // 4
+  tr.setPayoutAddress(input.settleAddress); // 5
+  input.settleMemo && tr.setPayoutExtraId(input.settleMemo); // 6
+  tr.setCurrencyFrom(input.depositMethodId); // 7
+  tr.setCurrencyTo(input.settleMethodId); // 8
+  tr.setAmountToProvider(serializeAmount(input.depositAmount)); // 9
+  tr.setAmountToWallet(serializeAmount(input.settleAmount)); // 10
+
+  // NOTE: This field is validated and accepted. Changing it to anything but the
+  // expected value will cause complete transaction to fail with "Wrong transaction id"
+  //
+  // This is especially interesting since it's the last field in the protobuf,
+  // indicating that the proto definition is correct
+  tr.setDeviceTransactionId(input.deviceTransactionId); // 11
 
   console.log('NewTransactionResponse:');
   console.log(tr.toObject());
@@ -122,7 +138,9 @@ export async function POST(req: any) {
     'Verify with openssl asn1parse -inform DER -in signature-der.bin'
   );
 
-  // Concatenate r and s values
+  // Concatenate r and s values. The result must be 64 bytes,
+  // else the wallet will throw "Expected signature to ... with length 64"
+  // Altering the signature results in the error "Signature verification failed"
   const rsSignature = Buffer.concat([r, s]);
   console.log('Signature (r + s):');
   console.log(rsSignature.toString('hex'));

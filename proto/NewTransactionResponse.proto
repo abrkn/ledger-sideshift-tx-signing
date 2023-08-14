@@ -1,6 +1,7 @@
 syntax = "proto3";
 package ledger_swap;
 
+// From https://github.com/LedgerHQ/app-exchange/blob/master/src/proto/protocol.proto
 message NewTransactionResponse {
     string    payin_address = 1;
     string    payin_extra_id = 2;
